@@ -109,20 +109,19 @@ jobs:
                   print(f"==> 发现上游 Release list 已移除: [{local_tag}]，正在清理本地 Release 页面...")
                   subprocess.run(["gh", "release", "delete", local_tag, "-R", target, "--yes"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-          # 2. 同步/更新上游现有的 Releases（利用 published_at 保证顺序完全一致）
+          # 2. 同步/更新上游现有的 Releases（确保 published_at、prerelease 和附件完全对齐）
           for rel in upstream_releases:
               tag = rel["tag_name"]
               title = rel["name"] or tag
               body = rel["body"] or ""
               draft = rel["draft"]
               prerelease = rel.get("prerelease", False)
-              published_at = rel.get("published_at") # 获取上游精确的发布时间戳
+              published_at = rel.get("published_at")
               upstream_assets = rel.get("assets", [])
               upstream_asset_names = {u["name"] for u in upstream_assets}
 
               if tag not in local_tags_map:
                   print(f"==> 发现新 Release，正在创建: {tag}")
-                  # 使用 gh api 直接创建并对齐原仓库的发布时间，确保排序正确
                   payload = json.dumps({
                       "tag_name": tag,
                       "name": title,
@@ -149,8 +148,20 @@ jobs:
                       shutil.rmtree("./temp_assets", ignore_errors=True)
               else:
                   local_rel_data = local_tags_map[tag]
+                  local_rel_id = local_rel_data["id"]
                   local_assets = {asset["name"]: asset for asset in local_rel_data.get("assets", [])}
                   
+                  # 【新增】每次运行都强制同步更新现有 Release 的元数据（包括精准的 published_at 和 prerelease 状态）
+                  print(f"==> 正在同步更新 Release 元数据: {tag}")
+                  patch_payload = json.dumps({
+                      "name": title,
+                      "body": body,
+                      "draft": draft,
+                      "prerelease": prerelease,
+                      "published_at": published_at
+                  })
+                  subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{target}/releases/{local_rel_id}", "--input", "-"], input=patch_payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
                   need_update = False
                   for u_asset in upstream_assets:
                       name = u_asset["name"]
